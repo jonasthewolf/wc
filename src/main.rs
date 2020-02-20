@@ -29,6 +29,7 @@ struct Metrics {
 // - non-empty last line
 // - performance (two iterations over line buffer)
 // - missing bytes from BOM
+// - too many allocations for buffer (at every iteration)
 fn count(filename: &str) -> Result<Metrics, Error> {
     let mut m = Metrics {
         bytes: 0,
