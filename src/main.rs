@@ -61,25 +61,25 @@ fn count(filename: &str) -> Result<Metrics, Error> {
 }
 
 fn print_metrics(m: &Metrics, opts: &ArgMatches) {
-    let f_c = opts.occurrences_of("chars");
-    let f_b = opts.occurrences_of("bytes");
-    let f_w = opts.occurrences_of("words");
-    let f_l = opts.occurrences_of("lines");
-    let f_ml = opts.occurrences_of("max_line_length");
-    let def = (f_c + f_w + f_b + f_ml + f_l) > 0;
-    if def || f_l > 0 {
+    let f_l = opts.is_present("lines");
+    let f_w = opts.is_present("words");
+    let f_c = opts.is_present("chars");
+    let f_b = opts.is_present("bytes");
+    let f_m = opts.is_present("max_line_length");
+    let def = !(f_c || f_w || f_b || f_m || f_l);
+    if def || f_l {
         print!("{:>8}", m.lines);
     }
-    if def || f_w > 0 {
+    if def || f_w {
         print!("{:>8}", m.words);
     }
-    if f_c > 0 { 
+    if f_c { 
         print!("{:>8}", m.chars); 
     }
-    if def || f_b > 0 {
+    if def || f_b {
         print!("{:>8}", m.bytes);
     }
-    if f_ml > 0 { 
+    if f_m { 
         print!("{:>8}", m.max_line_length); 
     }
     println!(" {}", m.filename);
@@ -106,6 +106,7 @@ fn calculate_total(ms: &[Metrics]) -> Metrics {
     m
 }
 
+// TODO: read from stdin if no files are given
 fn main() {
     let matches = App::new("wc")
         .version(crate_version!())
@@ -113,32 +114,33 @@ fn main() {
         .about(crate_description!())
         .arg(
             Arg::with_name("bytes")
-                .short("c")
+                .short('c')
                 .long("bytes")
                 .overrides_with("chars")
                 .help("Print only the byte counts.")
         )
         .arg(
             Arg::with_name("chars")
-                .short("m")
+                .short('m')
                 .long("chars")
+                .overrides_with("bytes")
                 .help("Print only the character counts.")
         )
         .arg(
             Arg::with_name("words")
-                .short("w")
+                .short('w')
                 .long("words")
                 .help("Print only the word counts.")
         )
         .arg(
             Arg::with_name("lines")
-                .short("l")
+                .short('l')
                 .long("lines")
                 .help("Print only the newline counts.")
         )
         .arg(
             Arg::with_name("max_line_length")
-                .short("L")
+                .short('L')
                 .long("max-line-length")
                 .help("Print only the maximum display widths. Tabs are set at every 8th column. Display widths of wide characters are considered. Non-printable characters are given 0 width.")
         )
