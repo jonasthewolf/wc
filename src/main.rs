@@ -1,7 +1,7 @@
 use clap::{crate_authors, crate_description, crate_version, App, Arg, ArgMatches};
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufReader, Error, ErrorKind};
+use std::io::{self, BufReader, Error, ErrorKind};
 
 //
 // wc prints one line of counts for each file, and if the file was given as an argument,
@@ -14,7 +14,7 @@ use std::io::{BufReader, Error, ErrorKind};
 // However, as a GNU extension, if only one count is printed, it is guaranteed to be printed without leading spaces.
 //
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Metrics {
     bytes: usize,
     chars: usize,
@@ -24,6 +24,29 @@ struct Metrics {
     filename: String,
 }
 
+struct ShowOptions {
+    lines: bool,
+    chars: bool,
+    bytes: bool,
+    words: bool,
+    max_line_length: bool,
+}
+
+impl ShowOptions {
+    fn from_clap_matches(opts: &ArgMatches) -> ShowOptions {
+        ShowOptions {
+            lines: opts.is_present("lines"),
+            words: opts.is_present("words"),
+            chars: opts.is_present("chars"),
+            bytes: opts.is_present("bytes"),
+            max_line_length: opts.is_present("max_line_length"),
+        }
+    }
+
+    fn is_default(&self) -> bool {
+        !(self.chars || self.words || self.bytes || self.max_line_length || self.lines)
+    }
+}
 // Issues:
 // - non-empty last line
 // - performance (two iterations over line buffer)
@@ -60,33 +83,35 @@ fn count(filename: &str) -> Result<Metrics, Error> {
     Ok(m)
 }
 
-fn print_metrics(m: &Metrics, opts: &ArgMatches) {
-    let f_l = opts.is_present("lines");
-    let f_w = opts.is_present("words");
-    let f_c = opts.is_present("chars");
-    let f_b = opts.is_present("bytes");
-    let f_m = opts.is_present("max_line_length");
-    let def = !(f_c || f_w || f_b || f_m || f_l);
-    if def || f_l {
-        print!("{:>8}", m.lines);
+fn print_metrics(out: &mut dyn io::Write,  m: &Metrics, opts: &ShowOptions, mwpc: &Metrics) {
+    let remove_column =
+    if opts.is_default() || opts.lines {
+        write!(out, "{:>width$} ", m.lines, width = mwpc.lines).unwrap();
+        1
+    } else {
+        0
+    };
+    if opts.is_default() || opts.words {
+        write!(out, "{:>width$} ", m.words, width = mwpc.words-remove_column).unwrap();
     }
-    if def || f_w {
-        print!("{:>8}", m.words);
+    if opts.chars {
+        write!(out, "{:>width$} ", m.chars, width = mwpc.chars-remove_column).unwrap();
     }
-    if f_c {
-        print!("{:>8}", m.chars);
+    if opts.is_default() || opts.bytes {
+        write!(out, "{:>width$} ", m.bytes, width = mwpc.bytes-remove_column).unwrap();
     }
-    if def || f_b {
-        print!("{:>8}", m.bytes);
+    if opts.max_line_length {
+        write!(out, 
+            "{:>width$} ",
+            m.max_line_length,
+            width = mwpc.max_line_length - remove_column
+        ).unwrap();
     }
-    if f_m {
-        print!("{:>8}", m.max_line_length);
-    }
-    println!(" {}", m.filename);
+    writeln!(out, "{}", m.filename).unwrap();
 }
 
-fn calculate_total(ms: &[Metrics]) -> Metrics {
-    let mut m = Metrics {
+fn calculate_total_and_max_width_per_column(ms: &[Metrics]) -> (Metrics, Metrics) {
+    let mut total = Metrics {
         bytes: 0,
         chars: 0,
         lines: 0,
@@ -94,32 +119,48 @@ fn calculate_total(ms: &[Metrics]) -> Metrics {
         max_line_length: 0,
         filename: "total".to_owned(),
     };
-
+    let mut mwpc = Metrics {
+        bytes: 0,
+        chars: 0,
+        lines: 0,
+        words: 0,
+        max_line_length: 0,
+        filename: "".to_owned(), // Width of filename is not important
+    };
     for m_x in ms {
-        m.bytes += m_x.bytes;
-        m.chars += m_x.chars;
-        m.lines += m_x.lines;
-        m.words += m_x.words;
-        m.max_line_length = std::cmp::max(m.max_line_length, m_x.max_line_length);
+        total.bytes += m_x.bytes;
+        total.chars += m_x.chars;
+        total.lines += m_x.lines;
+        total.words += m_x.words;
+        total.max_line_length = std::cmp::max(total.max_line_length, m_x.max_line_length);
+        mwpc.bytes = std::cmp::max(mwpc.bytes, m_x.bytes);
+        mwpc.chars = std::cmp::max(mwpc.chars, m_x.chars);
+        mwpc.lines = std::cmp::max(mwpc.lines, m_x.lines);
+        mwpc.words = std::cmp::max(mwpc.words, m_x.words);
+        // mwpc.max_line_length not needed again
     }
-
-    m
+    mwpc.bytes = std::cmp::max(mwpc.bytes.to_string().len(), 8);
+    mwpc.chars = std::cmp::max(mwpc.chars.to_string().len(), 8);
+    mwpc.lines = std::cmp::max(mwpc.lines.to_string().len(), 8);
+    mwpc.words = std::cmp::max(mwpc.words.to_string().len(), 8);
+    // TODO what to do with mwpc.max_line_length?
+    (total, mwpc)
 }
 
-fn print_count(matches: &ArgMatches) -> Result<(), Error> {
+fn print_count(mut out: &mut dyn io::Write, matches: &ArgMatches) -> Result<(), Error> {
+    let opts = ShowOptions::from_clap_matches(matches);
     if let Some(files) = matches.values_of("files") {
-        let mut total = vec![];
+        let mut all_metrics = vec![];
         for file in files {
             let m = count(&file)?;
-            total.push(m);
+            all_metrics.push(m);
         }
-        for m in &total {
-            print_metrics(&m, &matches);
+        let (total, mwpc) = calculate_total_and_max_width_per_column(&all_metrics);
+        for m in &all_metrics {
+            print_metrics(&mut out, &m, &opts, &mwpc);
         }
-        if total.len() > 1 {
-            let mut t = calculate_total(&total);
-            t.filename = "total".to_owned();
-            print_metrics(&t, &matches);
+        if all_metrics.len() > 1 {
+            print_metrics(&mut out, &total, &opts, &mwpc);
         }
     } else {
         // Stdin
@@ -185,8 +226,81 @@ fn main() {
     )
     .get_matches();
 
-    std::process::exit(match print_count(&matches) {
+    std::process::exit(match print_count(&mut io::stdout().lock(), &matches) {
         Err(_) => 1,
         Ok(_) => 0,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    fn sample_metrics() -> Vec<Metrics> {
+        let m0 = Metrics {
+            bytes: 123,
+            chars: 9_876_543_210,
+            lines: 789,
+            words: 1_239_875_670,
+            max_line_length: 456,
+            filename: "m0".to_owned(),
+        };
+        let m1 = Metrics {
+            bytes: 1_234_567_890,
+            chars: 1_234_567,
+            lines: 12_345_678_901,
+            words: 4_567_890,
+            max_line_length: 4_567_890_123,
+            filename: "m1".to_owned(),
+        };
+        vec![m0, m1]
+    }
+
+    #[test]
+    fn wider_columns() {
+        let metrics = sample_metrics();
+        let m0 = metrics[0].clone();
+        let m1 = metrics[1].clone();
+        let (total, mwpc) = calculate_total_and_max_width_per_column(&[m0.clone(), m1.clone()]);
+        assert_eq!(total.bytes, m0.bytes + m1.bytes);
+        assert_eq!(total.chars, m0.chars + m1.chars);
+        assert_eq!(total.lines, m0.lines + m1.lines);
+        assert_eq!(total.words, m0.words + m1.words);
+        assert_eq!(
+            total.max_line_length,
+            std::cmp::max(m0.max_line_length, m1.max_line_length)
+        );
+        assert_eq!(mwpc.bytes, 10);
+        assert_eq!(mwpc.chars, 10);
+        assert_eq!(mwpc.lines, 11);
+        assert_eq!(mwpc.words, 10);
+        //assert_eq!(mwpc.max_line_length, 10);
+    }
+
+    #[test]
+    fn print_wide_columns() {
+        let metrics = sample_metrics();
+        let m0 = metrics[0].clone();
+        let m1 = metrics[1].clone();
+        let mwpc = Metrics {
+            bytes: 10,
+            chars: 10,
+            lines: 11,
+            words: 10,
+            max_line_length: 10,
+            filename: "m1".to_owned(),
+        };
+        let opts = ShowOptions {
+            lines: true,
+            chars: true,
+            bytes: false,
+            words: true,
+            max_line_length: true,
+        };
+        let mut writer = vec![];
+        print_metrics(&mut writer, &m0, &opts, &mwpc);
+        print_metrics(&mut writer, &m1, &opts, &mwpc);
+        let output = std::str::from_utf8(writer.as_ref()).unwrap();
+        assert_eq!(dbg!(output), "        789 1239875670 9876543210       456 m0\n12345678901   4567890   1234567 4567890123 m1\n")
+    }
 }
