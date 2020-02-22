@@ -47,11 +47,9 @@ impl ShowOptions {
         !(self.chars || self.words || self.bytes || self.max_line_length || self.lines)
     }
 }
-// Issues:
-// - non-empty last line
-// - performance (two iterations over line buffer)
-// - missing bytes from BOM
-// - too many allocations for buffer (at every iteration)
+
+
+// TODO: missing bytes from BOM?
 fn count(filename: &str) -> Result<Metrics, Error> {
     let mut m = Metrics {
         bytes: 0,
@@ -63,28 +61,49 @@ fn count(filename: &str) -> Result<Metrics, Error> {
     };
 
     let f = File::open(filename)?;
-    let mut reader = BufReader::new(f);
-
+    let mut reader = BufReader::with_capacity(1024, f);
     loop {
-        let mut buffer = vec![];
-        let count = reader.read_until(0xa, &mut buffer)?;
-        if count == 0 {
+        let buffer = reader.fill_buf()?;
+        let mut last_char_was_word_separator  = None;
+        let mut bytes = 0;
+        if buffer.is_empty() {
             break;
         }
-        m.bytes += count;
         let s =
             std::str::from_utf8(&buffer).map_err(|err| Error::new(ErrorKind::InvalidData, err))?;
-        m.words += s.split_whitespace().count();
-        m.chars += s.chars().count();
-        m.max_line_length = std::cmp::max(m.max_line_length, count);
-        m.lines += 1;
+        for c in s.chars() {
+            bytes += c.len_utf8();
+            m.chars += 1;
+            if c == '\n' {
+                m.lines += 1;
+                break;
+            } else if c.is_whitespace() {
+                last_char_was_word_separator = Some(true);
+                if c ==  '\t' {
+                    m.max_line_length += 7;
+                }
+            } else {
+                if let Some(true) = last_char_was_word_separator {
+                    m.words += 1;
+                }
+                last_char_was_word_separator = Some(false);
+            }
+        }
+        if let Some(false) = last_char_was_word_separator {
+            m.words += 1;
+        }
+        m.bytes += bytes;
+        reader.consume(bytes);
+
+        // m.max_line_length = std::cmp::max(m.max_line_length, count);
+
     }
 
     Ok(m)
 }
 
 fn print_metrics(out: &mut dyn io::Write,  m: &Metrics, opts: &ShowOptions, mwpc: &Metrics) {
-    let remove_column =
+    let mut remove_column =
     if opts.is_default() || opts.lines {
         write!(out, "{:>width$} ", m.lines, width = mwpc.lines).unwrap();
         1
@@ -93,12 +112,15 @@ fn print_metrics(out: &mut dyn io::Write,  m: &Metrics, opts: &ShowOptions, mwpc
     };
     if opts.is_default() || opts.words {
         write!(out, "{:>width$} ", m.words, width = mwpc.words-remove_column).unwrap();
+        remove_column = 1;
     }
     if opts.chars {
         write!(out, "{:>width$} ", m.chars, width = mwpc.chars-remove_column).unwrap();
+        remove_column = 1;
     }
     if opts.is_default() || opts.bytes {
         write!(out, "{:>width$} ", m.bytes, width = mwpc.bytes-remove_column).unwrap();
+        remove_column = 1;
     }
     if opts.max_line_length {
         write!(out, 
@@ -171,7 +193,6 @@ fn print_count(mut out: &mut dyn io::Write, matches: &ArgMatches) -> Result<(), 
 
 // TODO: read from stdin if no files are given
 // TODO: files0_from
-// TODO: return value
 fn main() {
     let matches = App::new("wc")
         .version(crate_version!())

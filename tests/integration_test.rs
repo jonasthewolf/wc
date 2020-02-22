@@ -26,7 +26,11 @@ fn compare_file_to_gnu_wc(file: &[&str], args: &[&str]) {
 
 #[test]
 fn compare_simple() {
-    compare_file_to_gnu_wc(&["src/main.rs"], &[]);
+    compare_file_to_gnu_wc(&["tests/def.txt"], &[]);
+}
+#[test]
+fn compare_simple_small() {
+    compare_file_to_gnu_wc(&["tests/abc.txt"], &[]);
 }
 
 #[test]
