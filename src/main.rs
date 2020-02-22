@@ -24,8 +24,7 @@ struct Metrics {
     filename: String,
 }
 
-
-// Issues: 
+// Issues:
 // - non-empty last line
 // - performance (two iterations over line buffer)
 // - missing bytes from BOM
@@ -74,14 +73,14 @@ fn print_metrics(m: &Metrics, opts: &ArgMatches) {
     if def || f_w {
         print!("{:>8}", m.words);
     }
-    if f_c { 
-        print!("{:>8}", m.chars); 
+    if f_c {
+        print!("{:>8}", m.chars);
     }
     if def || f_b {
         print!("{:>8}", m.bytes);
     }
-    if f_m { 
-        print!("{:>8}", m.max_line_length); 
+    if f_m {
+        print!("{:>8}", m.max_line_length);
     }
     println!(" {}", m.filename);
 }
@@ -107,7 +106,31 @@ fn calculate_total(ms: &[Metrics]) -> Metrics {
     m
 }
 
+fn print_count(matches: &ArgMatches) -> Result<(), Error> {
+    if let Some(files) = matches.values_of("files") {
+        let mut total = vec![];
+        for file in files {
+            let m = count(&file)?;
+            total.push(m);
+        }
+        for m in &total {
+            print_metrics(&m, &matches);
+        }
+        if total.len() > 1 {
+            let mut t = calculate_total(&total);
+            t.filename = "total".to_owned();
+            print_metrics(&t, &matches);
+        }
+    } else {
+        // Stdin
+    }
+
+    Ok(())
+}
+
 // TODO: read from stdin if no files are given
+// TODO: files0_from
+// TODO: return value
 fn main() {
     let matches = App::new("wc")
         .version(crate_version!())
@@ -162,20 +185,8 @@ fn main() {
     )
     .get_matches();
 
-    if let Some(values) = matches.values_of("files") {
-        let mut total = vec![];
-        for file in values {
-            if let Ok(m) = count(&file) {
-                total.push(m);
-            }
-        }
-        for m in &total {
-            print_metrics(&m, &matches);
-        }
-        if total.len() > 1 {
-            let mut t = calculate_total(&total);
-            t.filename = "total".to_owned();
-            print_metrics(&t, &matches);
-        }
-    }
+    std::process::exit(match print_count(&matches) {
+        Err(_) => 1,
+        Ok(_) => 0,
+    });
 }
