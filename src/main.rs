@@ -95,7 +95,7 @@ fn count(filename: &str) -> Result<Metrics, Error> {
         m.bytes += bytes;
         reader.consume(bytes);
 
-        // m.max_line_length = std::cmp::max(m.max_line_length, count);
+        // TODO m.max_line_length = std::cmp::max(m.max_line_length, count);
 
     }
 
