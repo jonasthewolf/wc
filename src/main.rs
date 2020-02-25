@@ -23,7 +23,6 @@ struct Metrics {
     max_line_length: usize,
     filename: String,
 }
-
 struct ShowOptions {
     lines: bool,
     chars: bool,
@@ -62,6 +61,7 @@ fn count(filename: &str) -> Result<Metrics, Error> {
 
     let f = File::open(filename)?;
     let mut reader = BufReader::with_capacity(1024, f);
+    let mut line_len = 0;
     loop {
         let buffer = reader.fill_buf()?;
         let mut last_char_was_word_separator  = None;
@@ -74,14 +74,17 @@ fn count(filename: &str) -> Result<Metrics, Error> {
         for c in s.chars() {
             bytes += c.len_utf8();
             m.chars += 1;
+            line_len += 1;
             if c == '\n' {
                 m.lines += 1;
+                m.max_line_length = std::cmp::max(m.max_line_length, line_len);
+                line_len = 0;
                 break;
             } else if c.is_whitespace() {
                 last_char_was_word_separator = Some(true);
-                if c ==  '\t' {
-                    m.max_line_length += 7;
-                }
+                if c == '\t' {
+                    line_len += 7;
+                } 
             } else {
                 if let Some(true) = last_char_was_word_separator {
                     m.words += 1;
@@ -165,7 +168,7 @@ fn calculate_total_and_max_width_per_column(ms: &[Metrics]) -> (Metrics, Metrics
     mwpc.chars = std::cmp::max(mwpc.chars.to_string().len(), 8);
     mwpc.lines = std::cmp::max(mwpc.lines.to_string().len(), 8);
     mwpc.words = std::cmp::max(mwpc.words.to_string().len(), 8);
-    // TODO what to do with mwpc.max_line_length?
+    mwpc.max_line_length = std::cmp::max(total.max_line_length.to_string().len(), 8);
     (total, mwpc)
 }
 

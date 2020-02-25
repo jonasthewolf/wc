@@ -6,5 +6,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+lto = true
+codegen-units = 1
+
 [dependencies]
 clap = { git = "https://github.com/clap-rs/clap/" } # Required due to bug (override not working correctly) in 2.33.0
